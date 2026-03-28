@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dordle Solver</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #121213; color: #fff; font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  min-height: 100vh; display: flex; flex-direction: column; align-items: center;
+  padding: 20px;
+}
+header { text-align: center; margin-bottom: 24px; }
+header h1 { font-size: 2rem; letter-spacing: 2px; }
+header p { color: #818384; margin-top: 4px; font-size: 0.9rem; }
+
+.boards { display: flex; gap: 32px; justify-content: center; flex-wrap: wrap; margin-bottom: 20px; }
+.board-container { text-align: center; }
+.board-label { color: #818384; font-size: 0.8rem; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 1px; }
+.board {
+  display: grid; grid-template-rows: repeat(7, 1fr); gap: 5px;
+}
+.row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px; }
+.tile {
+  width: 52px; height: 52px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.5rem; font-weight: 700; text-transform: uppercase;
+  border: 2px solid #565758; border-radius: 4px;
+  background: #121213; color: #fff;
+  transition: background-color 0.15s, border-color 0.15s;
+  user-select: none;
+}
+.tile.empty { background: #121213; border-color: #3a3a3c; }
+.tile.gray { background: #3a3a3c; border-color: #3a3a3c; }
+.tile.yellow { background: #b59f3b; border-color: #b59f3b; }
+.tile.green { background: #538d4e; border-color: #538d4e; }
+.tile.clickable { cursor: pointer; }
+.tile.clickable:hover { border-color: #888; }
+
+.controls {
+  display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+  justify-content: center; margin-bottom: 20px;
+}
+.controls input {
+  width: 140px; padding: 10px 12px; font-size: 1rem;
+  background: #1a1a1b; border: 2px solid #565758; border-radius: 4px;
+  color: #fff; text-transform: uppercase; text-align: center;
+  font-weight: 700; letter-spacing: 4px;
+  outline: none;
+}
+.controls input:focus { border-color: #818384; }
+.controls button {
+  padding: 10px 18px; font-size: 0.9rem; font-weight: 600;
+  border: none; border-radius: 4px; cursor: pointer;
+  transition: opacity 0.15s;
+}
+.controls button:hover { opacity: 0.85; }
+.btn-apply { background: #538d4e; color: #fff; }
+.btn-undo { background: #b59f3b; color: #fff; }
+.btn-reset { background: #787c7e; color: #fff; }
+
+.results {
+  background: #1a1a1b; border-radius: 8px; padding: 16px 20px;
+  width: 100%; max-width: 520px; margin-bottom: 20px;
+}
+.results h3 { font-size: 1rem; margin-bottom: 10px; color: #818384; }
+.candidate-info { display: flex; gap: 20px; margin-bottom: 12px; font-size: 0.85rem; }
+.candidate-info span { color: #818384; }
+.candidate-info strong { color: #fff; }
+.result-list { list-style: none; }
+.result-list li {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 8px 12px; border-radius: 4px; margin-bottom: 2px;
+  font-size: 0.95rem;
+}
+.result-list li:nth-child(odd) { background: #262627; }
+.result-list li:first-child {
+  background: #1a3a1a; border: 1px solid #538d4e;
+  font-weight: 700;
+}
+.result-word { letter-spacing: 2px; font-weight: 600; }
+.result-entropy { color: #818384; font-size: 0.85rem; }
+.computing { color: #b59f3b; font-style: italic; padding: 8px 0; }
+
+.error { color: #e74c3c; font-size: 0.85rem; margin-top: 4px; min-height: 20px; text-align: center; }
+.status { color: #818384; font-size: 0.8rem; text-align: center; margin-top: 8px; }
+
+@media (max-width: 700px) {
+  .boards { flex-direction: column; align-items: center; gap: 20px; }
+  .tile { width: 44px; height: 44px; font-size: 1.2rem; }
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>🔮 Dordle Solver</h1>
+  <p>Entropy-powered optimal guess calculator</p>
+</header>
+
+<div class="boards">
+  <div class="board-container">
+    <div class="board-label">Board 1</div>
+    <div class="board" id="board1"></div>
+  </div>
+  <div class="board-container">
+    <div class="board-label">Board 2</div>
+    <div class="board" id="board2"></div>
+  </div>
+</div>
+
+<div class="controls">
+  <input type="text" id="guessInput" placeholder="GUESS" maxlength="5" autocomplete="off" spellcheck="false">
+  <button class="btn-apply" id="applyBtn">Apply Guess</button>
+  <button class="btn-undo" id="undoBtn">Undo</button>
+  <button class="btn-reset" id="resetBtn">Reset</button>
+</div>
+<div class="error" id="errorMsg"></div>
+
+<div class="results" id="resultsPanel">
+  <h3>Suggestions</h3>
+  <div class="candidate-info" id="candidateInfo"></div>
+  <div id="resultsContent">
+    <p style="color:#818384;font-size:0.9rem;">Enter your first guess to begin.</p>
+  </div>
+</div>
+
+<div class="status" id="status"></div>
+
+<script type="module">
+import init, { load_words, compute_pattern, filter_candidates, compute_entropy_top } from './pkg/dordle_solver.js';
+
+// Word lists - will be populated from JSON files
+let answerWords = [];
+let allGuessWords = [];
+
+// State
+let board1Candidates = []; // indices into answerWords
+let board2Candidates = [];
+let guesses = []; // [{word, colors1: [0-2], colors2: [0-2]}]
+let currentRowColors1 = [0,0,0,0,0]; // colors for current row being edited (board 1)
+let currentRowColors2 = [0,0,0,0,0]; // board 2
+
+const COLOR_ORDER = ['gray', 'yellow', 'green'];
+
+// Pack words into flat Uint8Array
+function packWords(words) {
+  const arr = new Uint8Array(words.length * 5);
+  for (let i = 0; i < words.length; i++) {
+    for (let j = 0; j < 5; j++) {
+      arr[i * 5 + j] = words[i].charCodeAt(j);
+    }
+  }
+  return arr;
+}
+
+// Encode colors array to base-3 pattern
+function colorsToPattern(colors) {
+  let pattern = 0;
+  let power = 1;
+  for (let i = 0; i < 5; i++) {
+    pattern += colors[i] * power;
+    power *= 3;
+  }
+  return pattern;
+}
+
+// Render both boards
+function renderBoards() {
+  renderBoard(1);
+  renderBoard(2);
+}
+
+function renderBoard(num) {
+  const container = document.getElementById(`board${num}`);
+  container.innerHTML = '';
+  for (let row = 0; row < 7; row++) {
+    const rowEl = document.createElement('div');
+    rowEl.className = 'row';
+    for (let col = 0; col < 5; col++) {
+      const tile = document.createElement('div');
+      tile.className = 'tile';
+      if (row < guesses.length) {
+        // Committed guess
+        const g = guesses[row];
+        const colors = num === 1 ? g.colors1 : g.colors2;
+        const colorClass = COLOR_ORDER[colors[col]];
+        tile.classList.add(colorClass);
+        tile.textContent = g.word[col];
+      } else if (row === guesses.length) {
+        // Current editable row
+        const colors = num === 1 ? currentRowColors1 : currentRowColors2;
+        const colorClass = COLOR_ORDER[colors[col]];
+        tile.classList.add(colorClass, 'clickable');
+        tile.textContent = '';
+        const c = col, n = num;
+        tile.addEventListener('click', () => cycleColor(n, c));
+      } else {
+        // Empty future rows
+        tile.classList.add('empty');
+      }
+      rowEl.appendChild(tile);
+    }
+    container.appendChild(rowEl);
+  }
+}
+
+function cycleColor(boardNum, col) {
+  const colors = boardNum === 1 ? currentRowColors1 : currentRowColors2;
+  colors[col] = (colors[col] + 1) % 3;
+  renderBoard(boardNum);
+}
+
+function showError(msg) {
+  document.getElementById('errorMsg').textContent = msg;
+  setTimeout(() => { document.getElementById('errorMsg').textContent = ''; }, 3000);
+}
+
+function applyGuess() {
+  const input = document.getElementById('guessInput');
+  const word = input.value.toUpperCase().trim();
+  if (word.length !== 5) { showError('Enter a 5-letter word'); return; }
+  if (!/^[A-Z]{5}$/.test(word)) { showError('Only letters A-Z'); return; }
+
+  // Check word is in valid guesses
+  const guessIdx = allGuessWords.indexOf(word);
+  if (guessIdx === -1) {
+    showError('Word not in valid guesses list');
+    return;
+  }
+
+  guesses.push({
+    word,
+    colors1: [...currentRowColors1],
+    colors2: [...currentRowColors2]
+  });
+
+  // Filter candidates for both boards
+  const pattern1 = colorsToPattern(currentRowColors1);
+  const pattern2 = colorsToPattern(currentRowColors2);
+
+  const wordBytes = packWords([word]);
+
+  board1Candidates = Array.from(filter_candidates(wordBytes, pattern1, new Uint32Array(board1Candidates)));
+  board2Candidates = Array.from(filter_candidates(wordBytes, pattern2, new Uint32Array(board2Candidates)));
+
+  // Reset current row colors
+  currentRowColors1 = [0,0,0,0,0];
+  currentRowColors2 = [0,0,0,0,0];
+  input.value = '';
+
+  renderBoards();
+  calculateBestGuesses();
+}
+
+function undoGuess() {
+  if (guesses.length === 0) return;
+  guesses.pop();
+
+  // Recompute candidates from scratch
+  board1Candidates = answerWords.map((_, i) => i);
+  board2Candidates = answerWords.map((_, i) => i);
+
+  for (const g of guesses) {
+    const wordBytes = packWords([g.word]);
+    const p1 = colorsToPattern(g.colors1);
+    const p2 = colorsToPattern(g.colors2);
+    board1Candidates = Array.from(filter_candidates(wordBytes, p1, new Uint32Array(board1Candidates)));
+    board2Candidates = Array.from(filter_candidates(wordBytes, p2, new Uint32Array(board2Candidates)));
+  }
+
+  currentRowColors1 = [0,0,0,0,0];
+  currentRowColors2 = [0,0,0,0,0];
+
+  renderBoards();
+  calculateBestGuesses();
+}
+
+function resetGame() {
+  guesses = [];
+  board1Candidates = answerWords.map((_, i) => i);
+  board2Candidates = answerWords.map((_, i) => i);
+  currentRowColors1 = [0,0,0,0,0];
+  currentRowColors2 = [0,0,0,0,0];
+  document.getElementById('guessInput').value = '';
+  renderBoards();
+  document.getElementById('resultsContent').innerHTML = '<p style="color:#818384;font-size:0.9rem;">Enter your first guess to begin.</p>';
+  document.getElementById('candidateInfo').innerHTML = '';
+}
+
+function calculateBestGuesses() {
+  const n1 = board1Candidates.length;
+  const n2 = board2Candidates.length;
+
+  document.getElementById('candidateInfo').innerHTML =
+    `<span>Board 1: <strong>${n1}</strong> candidates</span>` +
+    `<span>Board 2: <strong>${n2}</strong> candidates</span>`;
+
+  if (n1 === 0 && n2 === 0) {
+    document.getElementById('resultsContent').innerHTML =
+      '<p style="color:#e74c3c;font-size:0.9rem;">No candidates match. Check your color inputs.</p>';
+    return;
+  }
+
+  if (n1 === 1 && n2 === 1 && board1Candidates[0] === board2Candidates[0]) {
+    document.getElementById('resultsContent').innerHTML =
+      `<p style="color:#538d4e;font-size:1rem;font-weight:700;">Both boards solved: <strong>${answerWords[board1Candidates[0]]}</strong></p>`;
+    return;
+  }
+
+  if (n1 <= 1 && n2 <= 1) {
+    let html = '<ul class="result-list">';
+    if (n1 === 1) html += `<li><span class="result-word">Board 1: ${answerWords[board1Candidates[0]]}</span></li>`;
+    if (n2 === 1) html += `<li><span class="result-word">Board 2: ${answerWords[board2Candidates[0]]}</span></li>`;
+    html += '</ul>';
+    document.getElementById('resultsContent').innerHTML = html;
+    return;
+  }
+
+  // Show computing indicator
+  document.getElementById('resultsContent').innerHTML = '<p class="computing">Computing...</p>';
+
+  // Use requestAnimationFrame to allow UI to update
+  requestAnimationFrame(() => setTimeout(() => {
+    const t0 = performance.now();
+
+    // Build guesses list: all valid guess words
+    const guessList = allGuessWords;
+    const guessBytes = packWords(guessList);
+
+    const a1 = new Uint32Array(board1Candidates);
+    const a2 = new Uint32Array(board2Candidates);
+
+    const topK = 10;
+    const raw = compute_entropy_top(guessBytes, guessList.length, a1, a2, topK);
+
+    const elapsed = performance.now() - t0;
+    document.getElementById('status').textContent = `Computed in ${elapsed.toFixed(1)}ms`;
+
+    // Parse results: [index, entropy_scaled, index, entropy_scaled, ...]
+    const results = [];
+    for (let i = 0; i < raw.length; i += 2) {
+      results.push({ word: guessList[raw[i]], entropy: raw[i+1] / 1000 });
+    }
+
+    renderResults(results);
+  }, 10));
+}
+
+function renderResults(results) {
+  let html = '<ul class="result-list">';
+  for (const r of results) {
+    html += `<li>
+      <span class="result-word">${r.word}</span>
+      <span class="result-entropy">${r.entropy.toFixed(3)} bits</span>
+    </li>`;
+  }
+  html += '</ul>';
+  document.getElementById('resultsContent').innerHTML = html;
+}
+
+async function initApp() {
+  // Load word lists from JSON
+  const [answersResp, guessesResp] = await Promise.all([
+    fetch('./answers.json'), fetch('./guesses.json')
+  ]);
+  answerWords = await answersResp.json();
+  allGuessWords = await guessesResp.json();
+
+  // Init WASM
+  await init();
+
+  // Load ONLY answer words into WASM memory for candidate filtering.
+  // The guess list (which includes extra words) is passed separately to compute_entropy_top.
+  load_words(packWords(answerWords));
+
+  // Answer indices are 0..answerWords.length-1
+  board1Candidates = answerWords.map((_, i) => i);
+  board2Candidates = answerWords.map((_, i) => i);
+
+  renderBoards();
+  document.getElementById('status').textContent = `Loaded ${answerWords.length} answer candidates, ${allGuessWords.length} valid guesses`;
+}
+
+// Event listeners
+document.getElementById('applyBtn').addEventListener('click', applyGuess);
+document.getElementById('undoBtn').addEventListener('click', undoGuess);
+document.getElementById('resetBtn').addEventListener('click', resetGame);
+document.getElementById('guessInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') applyGuess();
+});
+document.getElementById('guessInput').addEventListener('input', (e) => {
+  e.target.value = e.target.value.toUpperCase().replace(/[^A-Z]/g, '');
+});
+
+initApp();
+</script>
+</body>
+</html>
